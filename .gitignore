@@ -1,0 +1,4 @@
+# Raw download cache (USGS query, Natural Earth, GEM repo clone)
+data/_raw/
+__pycache__/
+*.pyc

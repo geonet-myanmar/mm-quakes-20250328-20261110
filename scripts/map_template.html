@@ -1,0 +1,726 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Myanmar Earthquakes &amp; Active Faults</title>
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+<style>
+  :root {
+    --bg: #0e1117;
+    --panel: #161b22;
+    --panel-2: #1c2330;
+    --border: #2b3440;
+    --text: #e6edf3;
+    --muted: #8b949e;
+    --accent: #58a6ff;
+    --quake: #ffd166;
+    --fault: #f2545b;
+  }
+  * { box-sizing: border-box; }
+  html, body { height: 100%; margin: 0; }
+  body {
+    font: 13px/1.45 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+    background: var(--bg);
+    color: var(--text);
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+  }
+  header {
+    display: flex; align-items: center; gap: 14px; flex-wrap: wrap;
+    padding: 8px 14px;
+    background: var(--panel);
+    border-bottom: 1px solid var(--border);
+    z-index: 1000;
+  }
+  header h1 { font-size: 15px; margin: 0; font-weight: 600; letter-spacing: .2px; }
+  header .sub { color: var(--muted); font-size: 12px; }
+  header .spacer { flex: 1 1 auto; }
+  .stat {
+    display: flex; flex-direction: column; line-height: 1.2;
+    padding: 2px 10px; border-left: 1px solid var(--border);
+  }
+  .stat b { font-size: 14px; font-variant-numeric: tabular-nums; }
+  .stat span { color: var(--muted); font-size: 10.5px; text-transform: uppercase; letter-spacing: .6px; }
+  main { flex: 1 1 auto; position: relative; display: flex; min-height: 0; }
+  #map { flex: 1 1 auto; height: 100%; background: #0b0f14; }
+  #fallbackNote {
+    position: absolute; top: 10px; left: 50%; transform: translateX(-50%);
+    background: #3d2b12; border: 1px solid #7a5a20; color: #f0d9a8;
+    padding: 6px 12px; border-radius: 6px; font-size: 12px; z-index: 900;
+  }
+  aside {
+    width: 320px; flex: 0 0 320px; height: 100%; overflow-y: auto;
+    background: var(--panel); border-left: 1px solid var(--border);
+    padding: 14px 14px 40px;
+  }
+  aside h2 {
+    font-size: 11px; text-transform: uppercase; letter-spacing: .8px;
+    color: var(--muted); margin: 20px 0 8px; font-weight: 600;
+  }
+  aside h2:first-child { margin-top: 0; }
+  .ctl { margin-bottom: 12px; }
+  .ctl label { display: flex; justify-content: space-between; align-items: baseline; margin-bottom: 4px; }
+  .ctl .val { color: var(--accent); font-variant-numeric: tabular-nums; font-size: 12px; }
+  input[type=range] { width: 100%; accent-color: var(--accent); }
+  input[type=date] {
+    background: var(--panel-2); border: 1px solid var(--border); color: var(--text);
+    border-radius: 5px; padding: 4px 6px; font: inherit; font-size: 12px; width: 100%;
+  }
+  .checks { display: flex; flex-wrap: wrap; gap: 4px 12px; }
+  .checks label { display: flex; align-items: center; gap: 6px; cursor: pointer; }
+  .checks input { accent-color: var(--accent); }
+  .btn {
+    background: var(--panel-2); color: var(--text); border: 1px solid var(--border);
+    border-radius: 5px; padding: 5px 10px; font: inherit; font-size: 12px; cursor: pointer;
+  }
+  .btn:hover { border-color: var(--accent); color: var(--accent); }
+  .row { display: flex; gap: 6px; }
+  .swatch { display: inline-block; width: 11px; height: 11px; border-radius: 50%; vertical-align: -1px; margin-right: 5px; }
+  .swatch.line { width: 16px; height: 3px; border-radius: 2px; vertical-align: 3px; }
+  .legend-row { display: flex; align-items: center; margin-bottom: 5px; color: var(--muted); font-size: 12px; }
+  .legend-row b { color: var(--text); font-weight: 500; margin-left: auto; font-variant-numeric: tabular-nums; }
+  #detail {
+    position: absolute; bottom: 0; right: 320px; width: 320px; max-height: 55%;
+    background: var(--panel); border: 1px solid var(--border); border-bottom: none;
+    border-radius: 8px 8px 0 0; padding: 12px 14px; overflow-y: auto; z-index: 800;
+    display: none; box-shadow: 0 -6px 24px rgba(0,0,0,.5);
+  }
+  #detail.show { display: block; }
+  #detail h3 { margin: 0 0 6px; font-size: 13px; }
+  #detail table { width: 100%; border-collapse: collapse; font-size: 12px; }
+  #detail td { padding: 2px 0; vertical-align: top; }
+  #detail td:first-child { color: var(--muted); width: 46%; }
+  #detail a { color: var(--accent); }
+  #detail .close {
+    float: right; cursor: pointer; color: var(--muted); font-size: 16px; line-height: 1; padding: 0 2px;
+  }
+  #detail .close:hover { color: var(--text); }
+  .leaflet-popup-content { font-size: 12px; line-height: 1.4; }
+  .leaflet-popup-content b { font-size: 13px; }
+  #tooltip {
+    position: absolute; pointer-events: none; z-index: 850; display: none;
+    background: rgba(13,17,23,.94); border: 1px solid var(--border); border-radius: 5px;
+    padding: 5px 8px; font-size: 11.5px; max-width: 260px;
+  }
+  .hint { color: var(--muted); font-size: 11.5px; margin: 6px 0 0; }
+  code { background: var(--panel-2); padding: 1px 4px; border-radius: 3px; font-size: 11.5px; }
+</style>
+</head>
+<body>
+
+<header>
+  <h1>Myanmar Seismicity &amp; Active Faults</h1>
+  <span class="sub">USGS events 2025-03-28 &rarr; present &nbsp;|&nbsp; GEM Global Active Faults Database</span>
+  <span class="spacer"></span>
+  <div class="stat"><b id="sEq">0</b><span>quakes shown</span></div>
+  <div class="stat"><b id="sEqTot">0</b><span>quakes total</span></div>
+  <div class="stat"><b id="sFault">0</b><span>faults shown</span></div>
+  <div class="stat"><b id="sMax">0</b><span>max mag</span></div>
+</header>
+
+<main>
+  <div id="map"></div>
+  <div id="fallbackNote" style="display:none"></div>
+  <div id="tooltip"></div>
+
+  <div id="detail">
+    <span class="close" onclick="document.getElementById('detail').classList.remove('show')">&times;</span>
+    <div id="detailBody"></div>
+  </div>
+
+  <aside>
+    <h2>Earthquakes</h2>
+    <div class="ctl">
+      <label>Minimum magnitude <span class="val" id="magVal">0.0</span></label>
+      <input type="range" id="magMin" min="0" max="7.7" step="0.1" value="0" />
+    </div>
+    <div class="ctl">
+      <label>Maximum magnitude <span class="val" id="magMaxVal">7.7+</span></label>
+      <input type="range" id="magMax" min="0" max="7.7" step="0.1" value="7.7" />
+    </div>
+    <div class="ctl">
+      <label>From</label>
+      <input type="date" id="dateFrom" />
+    </div>
+    <div class="ctl">
+      <label>To</label>
+      <input type="date" id="dateTo" />
+    </div>
+
+    <h2>Layers</h2>
+    <div class="checks">
+      <label><input type="checkbox" id="lyEq" checked /> Earthquakes</label>
+      <label><input type="checkbox" id="lyFault" checked /> Active faults</label>
+      <label><input type="checkbox" id="lyBound" checked /> Myanmar boundary</label>
+    </div>
+    <div class="row" style="margin-top:10px">
+      <button class="btn" id="btnReset">Reset filters</button>
+      <button class="btn" id="btnFit">Zoom to data</button>
+    </div>
+
+    <h2>Earthquake magnitude</h2>
+    <div id="legendMag"></div>
+
+    <h2>Active faults by slip type</h2>
+    <div id="legendFault"></div>
+
+    <h2>About</h2>
+    <p class="hint">
+      Earthquakes: <a href="https://earthquake.usgs.gov/fdsnws/event/1/" target="_blank" rel="noopener" style="color:var(--accent)">USGS FDSN Event Web Service</a>,
+      events whose epicentre falls inside the Natural&nbsp;Earth&nbsp;10m Myanmar boundary
+      (plus the offshore Andaman&nbsp;Sea / Bay&nbsp;of&nbsp;Bengal events USGS itself
+      catalogues against Myanmar).
+    </p>
+    <p class="hint">
+      Faults: <a href="https://github.com/GEMScienceTools/gem-global-active-faults" target="_blank" rel="noopener" style="color:var(--accent)">GEM Global Active Faults Database</a>
+      (Styron &amp; Pagani, 2020), clipped to a 1.5&deg; buffer around Myanmar.
+    </p>
+    <p class="hint">
+      Datasets: <code>data/myanmar_earthquakes.geojson</code>, <code>data/myanmar_active_faults.geojson</code>.
+    </p>
+  </aside>
+</main>
+
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+<script>
+/* ------------------------------------------------------------------ *
+ * Embedded data (GeoJSON) — the map is a single self-contained file.
+ * ------------------------------------------------------------------ */
+const EQ_DATA  = __EQ_DATA__;
+const FLT_DATA = __FLT_DATA__;
+const BND_DATA = __BND_DATA__;
+
+/* ------------------------------------------------------------------ *
+ * Shared state + helpers
+ * ------------------------------------------------------------------ */
+const state = {
+  magMin: 0,
+  magMax: 99,
+  from: null,          // ms epoch
+  to: null,            // ms epoch
+  showEq: true,
+  showFault: true,
+  showBound: true,
+};
+
+const MAG_COLORS = [
+  { min: 7.0, color: '#ff2d55', label: 'M 7.0+' },
+  { min: 6.0, color: '#ff6b35', label: 'M 6.0 - 6.9' },
+  { min: 5.0, color: '#ffd166', label: 'M 5.0 - 5.9' },
+  { min: 4.0, color: '#7bd88f', label: 'M 4.0 - 4.9' },
+  { min: 0.0, color: '#58a6ff', label: 'M < 4.0' },
+];
+
+const SLIP_COLORS = {
+  'Reverse': '#ff6b35',
+  'Subduction_Thrust': '#ff2d55',
+  'Normal': '#58a6ff',
+  'Dextral': '#ffd166',
+  'Sinistral': '#c792ea',
+  'Anticline': '#7bd88f',
+  'Syncline': '#3fb950',
+};
+const SLIP_ORDER = ['Reverse', 'Subduction_Thrust', 'Normal', 'Dextral', 'Sinistral', 'Anticline', 'Syncline'];
+
+function magColor(m) {
+  for (const b of MAG_COLORS) if (m >= b.min) return b.color;
+  return MAG_COLORS[MAG_COLORS.length - 1].color;
+}
+function magRadius(m) { return Math.max(3, Math.round(2 + (m - 2) * 2.4)); }
+
+function slipColor(t) { return SLIP_COLORS[t] || '#9aa5b1'; }
+
+function faultLines(f) {
+  const g = f.geometry;
+  if (g.type === 'LineString') return [g.coordinates];
+  if (g.type === 'MultiLineString') return g.coordinates;
+  return [];
+}
+
+function fmtDate(ms) {
+  if (ms == null) return '-';
+  const d = new Date(ms);
+  return d.toISOString().replace('T', ' ').slice(0, 19) + ' UTC';
+}
+function fmtNum(v, d = 1) {
+  if (v == null || Number.isNaN(v)) return '-';
+  return Number(v).toFixed(d);
+}
+function tuple(v) {
+  if (!v) return '-';
+  const m = String(v).match(/^\(([^,]*),([^,]*),([^,]*)\)$/);
+  if (!m) return String(v);
+  const parts = [m[1], m[2], m[3]].map(x => (x === '' ? '' : x));
+  if (parts[1] === '' && parts[2] === '') return parts[0];
+  return `${parts[0]} (${parts[1]} - ${parts[2]})`;
+}
+
+function filteredEq() {
+  return EQ_DATA.features.filter(f => {
+    const p = f.properties;
+    const m = p.mag == null ? -99 : p.mag;
+    if (m < state.magMin || m > state.magMax) return false;
+    if (state.from != null && p.time < state.from) return false;
+    if (state.to != null && p.time > state.to) return false;
+    return true;
+  });
+}
+function filteredFaults() {
+  return FLT_DATA.features.filter(f => {
+    const t = f.properties.slip_type;
+    return !t || SLIP_COLORS[t] !== undefined;
+  });
+}
+
+/* ------------------------------------------------------------------ *
+ * Backend A: Leaflet
+ * ------------------------------------------------------------------ */
+let map = null, eqLayer = null, fltLayer = null, bndLayer = null;
+
+function initLeaflet() {
+  map = L.map('map', { zoomControl: true, worldCopyJump: true })
+    .setView([19.2, 96.6], 6);
+
+  const tiles = {
+    'Esri dark canvas': L.layerGroup([
+      L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/Canvas/World_Dark_Gray_Base/MapServer/tile/{z}/{y}/{x}', { attribution: 'Tiles &copy; Esri', maxZoom: 16 }),
+      L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/Canvas/World_Dark_Gray_Reference/MapServer/tile/{z}/{y}/{x}', { attribution: 'Tiles &copy; Esri', maxZoom: 16 }),
+    ]),
+    'OpenStreetMap': L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png', {
+      attribution: '&copy; OpenStreetMap contributors', maxZoom: 19,
+    }),
+    'Esri satellite': L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}', {
+      attribution: 'Tiles &copy; Esri', maxZoom: 18,
+    }),
+  };
+  tiles['Esri dark canvas'].addTo(map);
+  L.control.layers(tiles, null, { position: 'topright' }).addTo(map);
+
+  map.createPane('faults'); map.getPane('faults').style.zIndex = 380;
+  map.createPane('eqs');    map.getPane('eqs').style.zIndex = 420;
+
+  renderLeaflet();
+  bindControls();
+}
+
+function renderLeaflet() {
+  if (!map) return;
+  if (eqLayer) map.removeLayer(eqLayer);
+  if (fltLayer) map.removeLayer(fltLayer);
+  if (bndLayer) map.removeLayer(bndLayer);
+
+  if (state.showBound) {
+    bndLayer = L.geoJSON(BND_DATA, {
+      interactive: false,
+      style: { color: '#8b949e', weight: 1.2, dashArray: '5 4', fill: false },
+      pane: 'faults',
+    }).addTo(map);
+  }
+
+  if (state.showFault) {
+    const faults = filteredFaults();
+    fltLayer = L.geoJSON({ type: 'FeatureCollection', features: faults }, {
+      pane: 'faults',
+      style: f => ({
+        color: slipColor(f.properties.slip_type),
+        weight: 1.4,
+        opacity: 0.85,
+        lineCap: 'round',
+      }),
+      onEachFeature: (f, lyr) => {
+        const p = f.properties;
+        lyr.bindTooltip(
+          `<b>${p.name || 'Unnamed fault'}</b><br>` +
+          `${p.slip_type || 'unknown slip type'}` +
+          (p.net_slip_rate ? ` · net slip rate ${tuple(p.net_slip_rate)} mm/yr` : ''),
+          { sticky: false }
+        );
+        lyr.on('click', () => showFaultDetail(f));
+      },
+    }).addTo(map);
+  }
+
+  if (state.showEq) {
+    const eqs = filteredEq();
+    eqLayer = L.layerGroup(eqs.map(f => {
+      const p = f.properties;
+      const c = f.geometry.coordinates;
+      const m = L.circleMarker([c[1], c[0]], {
+        radius: magRadius(p.mag),
+        color: '#0b0f14',
+        weight: 0.8,
+        fillColor: magColor(p.mag),
+        fillOpacity: 0.85,
+        pane: 'eqs',
+      });
+      const depth = c[2];
+      m.bindTooltip(
+        `<b>M ${fmtNum(p.mag)}</b> · ${fmtDate(p.time)}<br>` +
+        `${p.place || ''}<br>depth ${fmtNum(depth, 1)} km`,
+        { offset: [0, 0], direction: 'top' }
+      );
+      m.on('click', () => showEqDetail(f));
+      m.on('mouseover', () => { m.setStyle({ fillOpacity: 1, weight: 1.4 }); });
+      m.on('mouseout', () => { m.setStyle({ fillOpacity: 0.85, weight: 0.8 }); });
+      return m;
+    })).addTo(map);
+  }
+
+  updateStats();
+}
+
+function fitToData() {
+  if (!map) return;
+  const pts = [];
+  filteredEq().forEach(f => pts.push([f.geometry.coordinates[1], f.geometry.coordinates[0]]));
+  filteredFaults().forEach(f => faultLines(f).forEach(l => l.forEach(c => pts.push([c[1], c[0]]))));
+  if (!pts.length) return;
+  map.fitBounds(L.latLngBounds(pts).pad(0.15));
+}
+
+/* ------------------------------------------------------------------ *
+ * Backend B: inline canvas fallback (no network / no Leaflet)
+ * ------------------------------------------------------------------ */
+const Fallback = (() => {
+  let cv = null, ctx = null, w = 0, h = 0, dpr = 1;
+  let view = { cx: 96.6, cy: 19.2, scale: 1 };   // scale = px per degree
+  let hover = null, quads = [], segs = [];
+
+  const merc = (lon, lat) => {
+    const x = lon;
+    const s = Math.log(Math.tan(Math.PI / 4 + lat * Math.PI / 360));
+    return { x, y: -s * 180 / Math.PI };
+  };
+  const toPx = (lon, lat) => {
+    const m = merc(lon, lat);
+    const c = merc(view.cx, view.cy);
+    return [w / 2 + (m.x - c.x) * view.scale, h / 2 + (m.y - c.y) * view.scale];
+  };
+
+  function resize() {
+    if (!cv) return;
+    dpr = window.devicePixelRatio || 1;
+    w = cv.clientWidth; h = cv.clientHeight;
+    cv.width = w * dpr; cv.height = h * dpr;
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    draw();
+  }
+
+  function draw() {
+    if (!ctx) return;
+    ctx.fillStyle = '#0b0f14';
+    ctx.fillRect(0, 0, w, h);
+    quads = []; segs = [];
+
+    // graticule
+    ctx.strokeStyle = '#1c2330'; ctx.lineWidth = 1;
+    ctx.fillStyle = '#4b5563'; ctx.font = '10px sans-serif';
+    for (let lon = 85; lon <= 110; lon += 5) {
+      const a = toPx(lon, 5), b = toPx(lon, 32);
+      ctx.beginPath(); ctx.moveTo(a[0], a[1]); ctx.lineTo(b[0], b[1]); ctx.stroke();
+      ctx.fillText(lon + '°E', a[0] + 3, h - 6);
+    }
+    for (let lat = 5; lat <= 30; lat += 5) {
+      const a = toPx(90, lat), b = toPx(105, lat);
+      ctx.beginPath(); ctx.moveTo(a[0], a[1]); ctx.lineTo(b[0], b[1]); ctx.stroke();
+      ctx.fillText(lat + '°N', 4, a[1] - 3);
+    }
+
+    // boundary
+    if (state.showBound) {
+      ctx.strokeStyle = '#8b949e'; ctx.lineWidth = 1.4; ctx.setLineDash([5, 4]);
+      BND_DATA.features.forEach(f => {
+        const polys = f.geometry.type === 'Polygon' ? [f.geometry.coordinates] : f.geometry.coordinates;
+        polys.forEach(poly => poly.forEach(ring => {
+          ctx.beginPath();
+          ring.forEach((c, i) => { const p = toPx(c[0], c[1]); i ? ctx.lineTo(p[0], p[1]) : ctx.moveTo(p[0], p[1]); });
+          ctx.closePath(); ctx.stroke();
+        }));
+      });
+      ctx.setLineDash([]);
+    }
+
+    // faults
+    if (state.showFault) {
+      filteredFaults().forEach(f => {
+        const col = slipColor(f.properties.slip_type);
+        faultLines(f).forEach(line => {
+          ctx.strokeStyle = col; ctx.globalAlpha = 0.85; ctx.lineWidth = 1.5; ctx.lineCap = 'round';
+          ctx.beginPath();
+          line.forEach((c, i) => { const p = toPx(c[0], c[1]); i ? ctx.lineTo(p[0], p[1]) : ctx.moveTo(p[0], p[1]); });
+          ctx.stroke();
+          ctx.globalAlpha = 1;
+          for (let i = 0; i < line.length - 1; i++) {
+            const a = toPx(line[i][0], line[i][1]), b = toPx(line[i + 1][0], line[i + 1][1]);
+            segs.push({ a, b, f });
+          }
+        });
+      });
+    }
+
+    // earthquakes
+    if (state.showEq) {
+      filteredEq().forEach(f => {
+        const p = f.properties, c = f.geometry.coordinates;
+        const xy = toPx(c[0], c[1]);
+        const r = magRadius(p.mag);
+        ctx.beginPath(); ctx.arc(xy[0], xy[1], r, 0, Math.PI * 2);
+        ctx.fillStyle = magColor(p.mag); ctx.globalAlpha = 0.85; ctx.fill();
+        ctx.globalAlpha = 1; ctx.lineWidth = 0.8; ctx.strokeStyle = '#0b0f14'; ctx.stroke();
+        quads.push({ x: xy[0], y: xy[1], r, f });
+      });
+    }
+  }
+
+  function pick(mx, my) {
+    for (const q of quads) {
+      const dx = mx - q.x, dy = my - q.y;
+      if (dx * dx + dy * dy <= Math.max(q.r, 5) ** 2) return { type: 'eq', f: q.f };
+    }
+    let best = null, bestD = 6;
+    for (const s of segs) {
+      const d = distToSeg(mx, my, s.a, s.b);
+      if (d < bestD) { bestD = d; best = s; }
+    }
+    if (best) return { type: 'fault', f: best.f };
+    return null;
+  }
+  function distToSeg(px, py, a, b) {
+    const vx = b[0] - a[0], vy = b[1] - a[1];
+    const wx = px - a[0], wy = py - a[1];
+    const L = vx * vx + vy * vy;
+    let t = L ? (wx * vx + wy * vy) / L : 0;
+    t = Math.max(0, Math.min(1, t));
+    const dx = px - (a[0] + t * vx), dy = py - (a[1] + t * vy);
+    return Math.hypot(dx, dy);
+  }
+
+  function init() {
+    const el = document.getElementById('map');
+    el.innerHTML = '';
+    cv = document.createElement('canvas');
+    cv.style.cssText = 'width:100%;height:100%;display:block;cursor:crosshair';
+    el.appendChild(cv);
+    ctx = cv.getContext('2d');
+    resize();
+    window.addEventListener('resize', resize);
+    const tip = document.getElementById('tooltip');
+
+    cv.addEventListener('mousemove', e => {
+      const r = cv.getBoundingClientRect();
+      const mx = e.clientX - r.left, my = e.clientY - r.top;
+      const hit = pick(mx, my);
+      if (hit) {
+        const p = hit.f.properties;
+        tip.style.display = 'block';
+        tip.style.left = (e.clientX - r.left + 12) + 'px';
+        tip.style.top = (e.clientY - r.top + 12) + 'px';
+        tip.innerHTML = hit.type === 'eq'
+          ? `<b>M ${fmtNum(p.mag)}</b> · ${fmtDate(p.time)}<br>${p.place || ''}<br>depth ${fmtNum(hit.f.geometry.coordinates[2], 1)} km`
+          : `<b>${p.name || 'Unnamed fault'}</b><br>${p.slip_type || ''}`;
+        hover = hit;
+        cv.style.cursor = 'pointer';
+      } else {
+        tip.style.display = 'none'; hover = null; cv.style.cursor = 'crosshair';
+      }
+    });
+    cv.addEventListener('mouseleave', () => { tip.style.display = 'none'; });
+    cv.addEventListener('click', e => {
+      const r = cv.getBoundingClientRect();
+      const hit = pick(e.clientX - r.left, e.clientY - r.top);
+      if (!hit) return;
+      hit.type === 'eq' ? showEqDetail(hit.f) : showFaultDetail(hit.f);
+    });
+    cv.addEventListener('wheel', e => {
+      e.preventDefault();
+      const r = cv.getBoundingClientRect();
+      const mx = e.clientX - r.left, my = e.clientY - r.top;
+      const before = unproject(mx, my);
+      view.scale *= e.deltaY < 0 ? 1.15 : 1 / 1.15;
+      const after = unproject(mx, my);
+      view.cx += before[0] - after[0];
+      view.cy += before[1] - after[1];
+      draw();
+    }, { passive: false });
+    cv.addEventListener('mousedown', e => { drag = { x: e.clientX, y: e.clientY, cx: view.cx, cy: view.cy }; });
+    window.addEventListener('mouseup', () => { drag = null; });
+    cv.addEventListener('mousemove', e => {
+      if (!drag) return;
+      view.cx = drag.cx - (e.clientX - drag.x) / view.scale;
+      view.cy = drag.cy + (e.clientY - drag.y) / view.scale;
+      draw();
+    });
+  }
+  let drag = null;
+
+  function unproject(mx, my) {
+    const c = merc(view.cx, view.cy);
+    const x = c.x + (mx - w / 2) / view.scale;
+    const y = c.y + (my - h / 2) / view.scale;
+    const lat = 2 * Math.atan(Math.exp(y * Math.PI / 180)) - Math.PI / 2;
+    return [x, lat * 180 / Math.PI];
+  }
+
+  function fit() {
+    const pts = [];
+    filteredEq().forEach(f => pts.push(f.geometry.coordinates));
+    filteredFaults().forEach(f => faultLines(f).forEach(l => l.forEach(c => pts.push(c))));
+    if (!pts.length) return;
+    const lons = pts.map(p => p[0]), lats = pts.map(p => p[1]);
+    const lon0 = Math.min(...lons), lon1 = Math.max(...lons);
+    const lat0 = Math.min(...lats), lat1 = Math.max(...lats);
+    view.cx = (lon0 + lon1) / 2; view.cy = (lat0 + lat1) / 2;
+    const mx = merc(lon0, lat0).x, my = merc(lon0, lat0).y;
+    const wDeg = merc(lon1, lat1).x - mx;
+    const hDeg = Math.abs(merc(lon1, lat1).y - my);
+    view.scale = Math.min(w / (wDeg * 1.2), h / (hDeg * 1.2));
+    draw();
+  }
+
+  return { init, draw, fit, isReady: () => !!ctx };
+})();
+
+/* ------------------------------------------------------------------ *
+ * Detail panel
+ * ------------------------------------------------------------------ */
+function showEqDetail(f) {
+  const p = f.properties, c = f.geometry.coordinates;
+  document.getElementById('detailBody').innerHTML = `
+    <h3>M ${fmtNum(p.mag)} — ${p.place || 'Unknown location'}</h3>
+    <table>
+      <tr><td>Time (UTC)</td><td>${fmtDate(p.time)}</td></tr>
+      <tr><td>Latitude / Longitude</td><td>${fmtNum(c[1], 4)}, ${fmtNum(c[0], 4)}</td></tr>
+      <tr><td>Depth</td><td>${fmtNum(c[2], 1)} km</td></tr>
+      <tr><td>Magnitude type</td><td>${p.magType || '-'}</td></tr>
+      <tr><td>Event type</td><td>${p.type || '-'}</td></tr>
+      <tr><td>Review status</td><td>${p.status || '-'}</td></tr>
+      <tr><td>PAGER alert</td><td>${p.alert || '-'}</td></tr>
+      <tr><td>Shakemap (MMI)</td><td>${p.mmi != null ? p.mmi : '-'}</td></tr>
+      <tr><td>Felt reports</td><td>${p.felt != null ? p.felt : '-'}</td></tr>
+      <tr><td>Tsunami flag</td><td>${p.tsunami ? 'yes' : 'no'}</td></tr>
+      <tr><td>Stations used</td><td>${p.nst != null ? p.nst : '-'}</td></tr>
+      <tr><td>Event ID</td><td>${p.id || '-'}</td></tr>
+      <tr><td>USGS page</td><td><a href="${p.url}" target="_blank" rel="noopener">${p.url}</a></td></tr>
+    </table>`;
+  document.getElementById('detail').classList.add('show');
+}
+
+function showFaultDetail(f) {
+  const p = f.properties;
+  document.getElementById('detailBody').innerHTML = `
+    <h3>${p.name || 'Unnamed active fault'}</h3>
+    <table>
+      <tr><td>Slip type</td><td><span class="swatch" style="background:${slipColor(p.slip_type)}"></span>${p.slip_type || '-'}</td></tr>
+      <tr><td>Source catalog</td><td>${p.catalog_name || '-'}</td></tr>
+      <tr><td>Catalog ID</td><td>${p.catalog_id || '-'}</td></tr>
+      <tr><td>Fault zone</td><td>${p.fs_name || p.fz_name || '-'}</td></tr>
+      <tr><td>Average dip</td><td>${tuple(p.average_dip)}°</td></tr>
+      <tr><td>Average rake</td><td>${tuple(p.average_rake)}°</td></tr>
+      <tr><td>Dip direction</td><td>${p.dip_dir || '-'}</td></tr>
+      <tr><td>Net slip rate</td><td>${tuple(p.net_slip_rate)} mm/yr</td></tr>
+      <tr><td>Strike-slip rate</td><td>${tuple(p.strike_slip_rate)} mm/yr</td></tr>
+      <tr><td>Shortening rate</td><td>${tuple(p.shortening_rate)} mm/yr</td></tr>
+      <tr><td>Seismogenic depth</td><td>${tuple(p.upper_seis_depth)} – ${tuple(p.lower_seis_depth)} km</td></tr>
+      <tr><td>Activity confidence</td><td>${p.activity_confidence != null ? p.activity_confidence : '-'}</td></tr>
+      <tr><td>Last movement</td><td>${p.last_movement || '-'}</td></tr>
+      <tr><td>Reference</td><td>${p.reference || '-'}</td></tr>
+      <tr><td>Notes</td><td>${p.notes || '-'}</td></tr>
+    </table>`;
+  document.getElementById('detail').classList.add('show');
+}
+
+/* ------------------------------------------------------------------ *
+ * Controls + stats
+ * ------------------------------------------------------------------ */
+function updateStats() {
+  const eqs = filteredEq();
+  document.getElementById('sEq').textContent = eqs.length;
+  document.getElementById('sEqTot').textContent = EQ_DATA.features.length;
+  document.getElementById('sFault').textContent = state.showFault ? filteredFaults().length : 0;
+  const mags = eqs.map(f => f.properties.mag).filter(m => m != null);
+  document.getElementById('sMax').textContent = mags.length ? Math.max(...mags).toFixed(1) : '-';
+}
+
+function buildLegend() {
+  document.getElementById('legendMag').innerHTML = MAG_COLORS.map(b =>
+    `<div class="legend-row"><span class="swatch" style="background:${b.color}"></span>${b.label}</div>`
+  ).join('');
+  const counts = {};
+  filteredFaults().forEach(f => { const t = f.properties.slip_type || 'Unknown'; counts[t] = (counts[t] || 0) + 1; });
+  document.getElementById('legendFault').innerHTML = SLIP_ORDER
+    .filter(t => counts[t])
+    .map(t => `<div class="legend-row"><span class="swatch line" style="background:${slipColor(t)}"></span>${t}<b>${counts[t]}</b></div>`)
+    .join('') + `<div class="legend-row"><span class="swatch line" style="background:#9aa5b1"></span>Unclassified<b>${counts['Unknown'] || 0}</b></div>`;
+}
+
+function bindControls() {
+  const magMin = document.getElementById('magMin');
+  const magMax = document.getElementById('magMax');
+  const dateFrom = document.getElementById('dateFrom');
+  const dateTo = document.getElementById('dateTo');
+
+  const times = EQ_DATA.features.map(f => f.properties.time).filter(t => t != null);
+  const t0 = new Date(Math.min(...times)), t1 = new Date(Math.max(...times));
+  dateFrom.min = dateTo.min = t0.toISOString().slice(0, 10);
+  dateFrom.max = dateTo.max = t1.toISOString().slice(0, 10);
+  dateFrom.value = t0.toISOString().slice(0, 10);
+  dateTo.value = t1.toISOString().slice(0, 10);
+
+  const apply = () => {
+    state.magMin = parseFloat(magMin.value);
+    state.magMax = parseFloat(magMax.value);
+    document.getElementById('magVal').textContent = state.magMin.toFixed(1);
+    document.getElementById('magMaxVal').textContent = state.magMax >= 7.7 ? '7.7+' : state.magMax.toFixed(1);
+    state.from = dateFrom.value ? Date.parse(dateFrom.value + 'T00:00:00Z') : null;
+    state.to = dateTo.value ? Date.parse(dateTo.value + 'T23:59:59Z') : null;
+    state.showEq = document.getElementById('lyEq').checked;
+    state.showFault = document.getElementById('lyFault').checked;
+    state.showBound = document.getElementById('lyBound').checked;
+    if (map) renderLeaflet(); else { Fallback.draw(); updateStats(); }
+    buildLegend();
+  };
+
+  ['magMin', 'magMax', 'dateFrom', 'dateTo', 'lyEq', 'lyFault', 'lyBound'].forEach(id =>
+    document.getElementById(id).addEventListener('input', apply));
+
+  document.getElementById('btnReset').addEventListener('click', () => {
+    magMin.value = 0; magMax.value = 7.7;
+    dateFrom.value = t0.toISOString().slice(0, 10);
+    dateTo.value = t1.toISOString().slice(0, 10);
+    document.getElementById('lyEq').checked = true;
+    document.getElementById('lyFault').checked = true;
+    document.getElementById('lyBound').checked = true;
+    apply();
+  });
+  document.getElementById('btnFit').addEventListener('click', () => {
+    map ? fitToData() : Fallback.fit();
+  });
+  apply();
+}
+
+/* ------------------------------------------------------------------ *
+ * Boot
+ * ------------------------------------------------------------------ */
+(function boot() {
+  buildLegend();
+  if (typeof L !== 'undefined') {
+    try {
+      initLeaflet();
+      return;
+    } catch (e) {
+      console.warn('Leaflet init failed, falling back to canvas:', e);
+    }
+  }
+  const note = document.getElementById('fallbackNote');
+  note.style.display = 'block';
+  note.innerHTML = 'Leaflet / map tiles could not be loaded (offline?). Showing the built-in canvas renderer.';
+  Fallback.init();
+  Fallback.fit();
+  bindControls();
+  buildLegend();
+})();
+</script>
+</body>
+</html>
